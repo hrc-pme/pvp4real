@@ -1,0 +1,40 @@
+x-common-basic: &common-basic
+  build:
+    context: ..
+    dockerfile: docker/dockerfile.cpu
+    target: release-stage
+  image: pomelo925/pvp4real:latest
+  privileged: true
+  stop_grace_period: 1s
+  network_mode: "host"
+  stdin_open: true
+  tty: true
+  environment:
+    DISPLAY: ${DISPLAY}
+    QT_X11_NO_MITSHM: 1
+
+x-common-ros2: &common-ros2
+  volumes:
+    - ../pvp4real:/workspace/pvp4real
+    - ../colcon-ws:/workspace/colcon-ws
+    - ./services:/docker/services
+  working_dir: /workspace
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+
+services:
+  dev:
+    <<: [*common-basic, *common-ros2]
+    container_name: pvp4real-cpu-dev
+    command: bash
+
+  deploy:
+    <<: [*common-basic, *common-ros2]
+    container_name: pvp4real-cpu-deploy
+    command: bash /docker/services/deploy.sh
+
+  cb:
+    <<: [*common-basic, *common-ros2]
+    container_name: pvp4real-cpu-cb
+    command: bash /docker/services/cb.sh

@@ -1,16 +1,25 @@
-"""
-Training script for training PPO in MetaDrive Safety Env.
-"""
 import argparse
 import os
 from pathlib import Path
+import multiprocessing
 
+# Clean up problematic environment variables before multiprocessing
+if 'PYTHONUTF8' in os.environ:
+    del os.environ['PYTHONUTF8']
+
+# Set multiprocessing start method to avoid fork issues in Docker
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
+
+from pvp.experiments.metadrive.human_in_the_loop_env import HumanInTheLoopEnv
 from pvp.sb3.common.callbacks import CallbackList, CheckpointCallback
-from pvp.sb3.common.env_util import make_vec_env
-from pvp.sb3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from pvp.sb3.common.monitor import Monitor
+from pvp.sb3.common.vec_env import SubprocVecEnv
 from pvp.sb3.common.wandb_callback import WandbCallback
-from pvp.sb3.ppo import PPO
-from pvp.sb3.ppo.policies import ActorCriticPolicy
+from pvp.sb3.td3.policies import TD3Policy
+from pvp.sb3.td3.td3 import TD3, ReplayBuffer
 from pvp.utils.utils import get_time_str
 
 
@@ -21,27 +30,22 @@ def register_env(make_env_fn, env_name):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--exp_name", default="ppo_metadrive", type=str, help="The name for this batch of experiments.")
+    parser.add_argument("--exp_name", default="td3_metadrive", type=str, help="The name for this batch of experiments.")
     parser.add_argument("--seed", default=0, type=int, help="The random seed.")
-    parser.add_argument("--ckpt", default=None, type=str, help="Path to previous checkpoint.")
-    parser.add_argument("--debug", action="store_true", help="Set to True when debugging.")
     parser.add_argument("--wandb", action="store_true", help="Set to True to upload stats to wandb.")
     parser.add_argument("--wandb_project", type=str, default="", help="The project name for wandb.")
     parser.add_argument("--wandb_team", type=str, default="", help="The team name for wandb.")
     args = parser.parse_args()
 
-    # FIXME: Remove this in future.
-    if args.wandb_team is None:
-        args.wandb_team = "drivingforce"
-    if args.wandb_project is None:
-        args.wandb_project = "pvp2024"
-
     # ===== Set up some arguments =====
+    import uuid
+
+    # control_device = args.device
     # control_device = args.device
     experiment_batch_name = "{}".format(args.exp_name)
     seed = args.seed
-    import uuid
     trial_name = "{}_{}_{}".format(experiment_batch_name, get_time_str(), uuid.uuid4().hex[:8])
+    print("Trial name is set to: ", trial_name)
 
     use_wandb = args.wandb
     project_name = args.wandb_project
@@ -57,26 +61,28 @@ if __name__ == '__main__':
 
     # ===== Setup the config =====
     config = dict(
-        # ===== Environment =====
-        env_config=dict(
-            use_render=False,  # Open the interface
-            manual_control=False,  # Allow receiving control signal from external device
-            # controller=control_device,
-            # window_size=(1600, 1100),
-        ),
-        num_train_envs=4,
+        # Environment config
+        # env_config={"main_exp": False, "horizon": 1500},
 
-        # ===== Training =====
+        # Algorithm config
         algo=dict(
-            policy=ActorCriticPolicy,
-            n_steps=512,  # n_steps * n_envs = total_batch_size
-            n_epochs=20,
-            learning_rate=5e-5,
-            batch_size=256,
-            clip_range=0.1,
-            vf_coef=0.5,
-            ent_coef=0.0,
-            max_grad_norm=10.0,
+            policy=TD3Policy,
+            replay_buffer_class=ReplayBuffer,  ###
+            replay_buffer_kwargs=dict(),
+            policy_kwargs=dict(net_arch=[400, 300]),
+            env=None,
+            learning_rate=1e-4,
+            optimize_memory_usage=True,
+            learning_starts=200,
+            batch_size=1024,
+            tau=0.005,
+            gamma=0.99,
+            train_freq=1,
+            gradient_steps=1,
+            action_noise=None,
+            # action_noise=NormalActionNoise(mean=np.zeros([2,]), sigma=0.15 * np.ones([2,])),
+            # target_policy_noise=0,
+            # policy_delay=1,
             tensorboard_log=trial_dir,
             create_eval_env=False,
             verbose=2,
@@ -91,25 +97,21 @@ if __name__ == '__main__':
         trial_name=trial_name,
         log_dir=str(trial_dir)
     )
-    vec_env_cls = SubprocVecEnv
-    if args.debug:
-        config["num_train_envs"] = 1
-        config["algo"]["n_steps"] = 64
-        vec_env_cls = DummyVecEnv
 
     # ===== Setup the training environment =====
-    train_env_config = config["env_config"]
+    def make_train_env():
+        env_config = dict(
+            use_render=False,  # Open the interface
+            manual_control=False,  # Allow receiving control signal from external device
+            # controller=control_device,
+            window_size=(1600, 1100),
+        )
 
-    def _make_train_env():
-        from pvp.experiments.metadrive.human_in_the_loop_env import HumanInTheLoopEnv
-        from pvp.sb3.common.monitor import Monitor
-        train_env = HumanInTheLoopEnv(config=train_env_config)
-        train_env = Monitor(env=train_env, filename=str(trial_dir))
+        train_env = HumanInTheLoopEnv(config=env_config)
         return train_env
 
-    train_env_name = "metadrive_train-v0"
-    register_env(_make_train_env, train_env_name)
-    train_env = make_vec_env(_make_train_env, n_envs=config["num_train_envs"], vec_env_cls=vec_env_cls)
+    train_env = make_train_env()
+    train_env = Monitor(env=train_env, filename=str(trial_dir))
     config["algo"]["env"] = train_env
     assert config["algo"]["env"] is not None
 
@@ -130,9 +132,8 @@ if __name__ == '__main__':
     eval_env = SubprocVecEnv([_make_eval_env])
 
     # ===== Setup the callbacks =====
-    save_freq = 1_0000  # Number of steps per model checkpoint
     callbacks = [
-        CheckpointCallback(name_prefix="rl_model", verbose=2, save_freq=save_freq, save_path=str(trial_dir / "models"))
+        CheckpointCallback(name_prefix="rl_model", verbose=1, save_freq=1_0000, save_path=str(trial_dir / "models"))
     ]
     if use_wandb:
         callbacks.append(
@@ -144,17 +145,20 @@ if __name__ == '__main__':
                 config=config
             )
         )
+
     callbacks = CallbackList(callbacks)
 
-    # ===== Setup the training algorithm =====
-    model = PPO(**config["algo"])
+    # if args.eval:
+    #     # eval_env = SubprocVecEnv([])
+    #     # eval_env = SubprocVecEnv([lambda: _make_eval_env(False)])
+    #     config["algo"]["learning_rate"] = 0.0
+    #     config["algo"]["train_freq"] = (1, "step")
 
-    if args.ckpt:
-        ckpt = Path(args.ckpt)
-        print(f"Loading checkpoint from {ckpt}!")
-        from pvp.sb3.common.save_util import load_from_zip_file
-        data, params, pytorch_variables = load_from_zip_file(ckpt, device=model.device, print_system_info=False)
-        model.set_parameters(params, exact_match=True, device=model.device)
+    # ===== Setup the training algorithm =====
+    # if args.ckpt:
+    #     model = TD3.load(args.ckpt, **config["algo"])
+    # else:
+    model = TD3(**config["algo"])
 
     # ===== Launch training =====
     model.learn(
@@ -165,13 +169,12 @@ if __name__ == '__main__':
 
         # eval
         eval_env=eval_env,
+        # eval_freq=5000,
         eval_freq=150,
         n_eval_episodes=50,
         eval_log_path=str(trial_dir),
 
         # logging
-        tb_log_name=experiment_batch_name,
+        tb_log_name=experiment_batch_name,  # Should place the algorithm name here!
         log_interval=1,
-        # save_buffer=False,
-        # load_buffer=False,
     )

@@ -2,9 +2,20 @@ import argparse
 import os
 import uuid
 from pathlib import Path
+import multiprocessing
+
+# Clean up problematic environment variables before multiprocessing
+if 'PYTHONUTF8' in os.environ:
+    del os.environ['PYTHONUTF8']
+
+# Set multiprocessing start method to avoid fork issues in Docker
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
 
 from pvp.experiments.metadrive.egpo.fakehuman_env import FakeHumanEnv
-from pvp.pvp_td3 import PVPTD3
+from pvp.eil import EIL
 from pvp.sb3.common.callbacks import CallbackList, CheckpointCallback
 from pvp.sb3.common.monitor import Monitor
 from pvp.sb3.common.vec_env import SubprocVecEnv
@@ -17,7 +28,7 @@ from pvp.utils.utils import get_time_str
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--exp_name", default="pvp_metadrive_fakehuman", type=str, help="The name for this batch of experiments."
+        "--exp_name", default="eil_metadrive_fakehuman", type=str, help="The name for this batch of experiments."
     )
     parser.add_argument("--batch_size", default=1024, type=int)
     parser.add_argument("--learning_starts", default=10, type=int)
@@ -159,7 +170,7 @@ if __name__ == '__main__':
     callbacks = CallbackList(callbacks)
 
     # ===== Setup the training algorithm =====
-    model = PVPTD3(**config["algo"])
+    model = EIL(**config["algo"])
     if args.ckpt:
         ckpt = Path(args.ckpt)
         print(f"Loading checkpoint from {ckpt}!")
@@ -178,7 +189,7 @@ if __name__ == '__main__':
         # eval
         eval_env=eval_env,
         eval_freq=150,
-        n_eval_episodes=50,
+        n_eval_episodes=1,
         eval_log_path=str(trial_dir),
 
         # logging

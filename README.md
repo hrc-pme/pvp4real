@@ -1,112 +1,40 @@
 
-<h1 align="center">Data-Efficient Learning from Human Interventions for Mobile Robots</h1>
-
-<h3 align="center"><b>ICRA 2025</b>
-</h3>
-
-<h3 align="center">
-  <a href="https://metadriverse.github.io/pvp4real/"><b>Webpage</b></a> |
-  <a href="https://github.com/metadriverse/pvp4real"><b>Code</b></a> |
-  <a href="https://arxiv.org/pdf/2503.04969"><b>PDF</b></a>
-</h3>
+<h1 align="center">PVP4Real：人類介入下的資料高效率學習</h1>
 
 <p align="center">
-  <img src="PVP4Real_Teaser.png" alt="PVP4Real" width="100%">
+  <img src="assets/PVP4Real_Teaser.png" alt="PVP4Real" width="100%">
 </p>
 
-Compared to [PVP repo](https://metadriverse.github.io/pvp/), we include the simulated human experiments in this repo.
+本專案包含模擬人類介入的訓練與評估腳本，對應 ICRA 2025 論文與網頁：
+<a href="https://metadriverse.github.io/pvp4real/"><b>Webpage</b></a> |
+<a href="https://github.com/metadriverse/pvp4real"><b>Code</b></a> |
+<a href="https://arxiv.org/pdf/2503.04969"><b>PDF</b></a>
+
+## 專案大致架構
+
+- [pvp4real/pvp](pvp4real/pvp) ：主要訓練與算法實作
+  - [pvp4real/pvp/experiments](pvp4real/pvp/experiments) ：各種實驗入口（含 MetaDrive）
+  - [pvp4real/pvp/sb3](pvp4real/pvp/sb3) ：內建的 RL/控制演算法
+  - [pvp4real/pvp/utils](pvp4real/pvp/utils) ：工具與輔助模組
+- [pvp4real/scripts](pvp4real/scripts) ：一鍵啟動實驗的 shell 腳本
+- [docker](docker) ：容器化環境（CPU 版本）
+- [assets](assets) ：專案圖片與資源
+
+## 如何使用
 
 
+### 啟動實驗
 
-
-## Installation
-
-```bash
-# Clone the code to local machine
-git clone https://github.com/pengzhenghao/pvp4real
-cd pvp4real
-
-# Create Conda environment
-conda create -n pvp4real python=3.7
-conda activate pvp4real
-
-# Install dependencies
-pip install setuptools==65.5.0 pip==21  # Fix gym installation issue
-pip install wheel==0.38.0  # Fix gym installation issue
-pip install -r requirements.txt
-pip install -e .
-pip install torch
-
-# Install MetaDrive
-# In case you need it, the MetaDrive commit we ran on is: c29cc37d30158fe70d963647b6c80dc814248f60
-# Using latest MetaDrive should work:
-pip install git+https://github.com/metadriverse/metadrive.git
-
-```
-
-
-## Launch Experiments
-
-You can find the scripts to launch a batch of experiments in the [`./scripts`](./scripts) folder. Call them by:
+常用腳本在 [pvp4real/scripts](pvp4real/scripts)：
 
 ```bash
 bash scripts/metadrive_simhuman_pvp4real.sh
-bash scripts/metadrive_simhuman_pvp.sh
-bash scripts/metadrive_simhuman_haco.sh
-bash scripts/metadrive_simhuman_ppo.sh
-bash scripts/metadrive_simhuman_td3.sh
-bash scripts/metadrive_simhuman_bc.sh
-bash scripts/metadrive_simhuman_eil.sh
-bash scripts/metadrive_simhuman_hgdagger.sh
 ```
 
-
-Here is the example on how to launch PVP4Real:
+或直接執行訓練入口：
 
 ```bash
 python pvp/experiments/metadrive/train_pvp_metadrive_fakehuman.py \
---exp_name="pvp4real" \
---bc_loss_weight=1.0
-```
-
-
-
----
-
-Tips:
-
-We evaluate frequently to get beautiful learning curves. You can change the evaluation frequency when debugging:
-
-```python
-model.learn(
-    ...
-    eval_freq=150,  # <<< Change this
-    n_eval_episodes=50,  # <<< Change this
-)
-```
-
-You can use wandb to monitor the training process:
-
-```bash
-nohup python pvp/experiments/metadrive/train_pvp_metadrive_fakehuman.py \
---exp_name=${EXP_NAME} \
---wandb \
---wandb_project=pvp2024 \
---wandb_team=drivingforce
-```
-
-> [!NOTE]  
-> The BC, HGDagger and EIL experiments are not strictly following the paper.
-> The BC data is not collected before training but instead collected and is expanding
-> during the training process. 
-
-## 📎 References
-
-```latex
-@article{peng2025data,
-  title={Data-Efficient Learning from Human Interventions for Mobile Robots},
-  author={Peng, Zhenghao and Liu, Zhizheng and Zhou, Bolei},
-  journal={arXiv preprint arXiv:2503.04969},
-  year={2025}
-}
+  --exp_name="pvp4real" \
+  --bc_loss_weight=1.0
 ```

@@ -1,0 +1,142 @@
+################################################################################################
+# Base stage
+# - ROS2 Humble Desktop base (Ubuntu 22.04, Python 3.10)
+# - System dependencies and tooling
+# - Remove apt-installed sympy to avoid pip uninstall conflicts
+################################################################################################
+FROM osrf/ros:humble-desktop AS base-stage
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python toolchain
+    python3-pip \
+    python3-dev \
+    \
+    # Network / debugging
+    iputils-ping \
+    \
+    # Dev tools
+    git \
+    vim \
+    wget \
+    curl \
+    \
+    # Virtual display support for rendering
+    xvfb \
+    x11-utils \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    \
+    # ROS2 Humble DDS middleware
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
+    \
+    # Explicitly install then purge apt sympy to avoid distutils conflicts
+    python3-sympy \
+    && apt-get purge -y python3-sympy \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip toolchain (pip-managed Python environment only)
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
+
+
+################################################################################################
+# Python dependencies stage
+# - Core ML / RL / simulation dependencies
+# - MetaDrive simulator
+################################################################################################
+FROM base-stage AS python-deps-stage
+
+RUN pip3 install --no-cache-dir \
+    \
+    # ------------------------------------------------------------------
+    # Scientific & data processing
+    # ------------------------------------------------------------------
+    "numpy==1.26.4" \
+    pandas \
+    h5py \
+    networkx \
+    "scipy<1.15" \
+    sympy==1.12 \
+    \
+    # ------------------------------------------------------------------
+    # Image processing & computer vision
+    # ------------------------------------------------------------------
+    imageio \
+    imgaug \
+    scikit-image \
+    Pillow \
+    \
+    # ------------------------------------------------------------------
+    # ML / RL frameworks & logging
+    # ------------------------------------------------------------------
+    torch \
+    "gym==0.26.2" \
+    "minigrid==2.3.1" \
+    tensorboard \
+    wandb \
+    dm-tree \
+    \
+    # ------------------------------------------------------------------
+    # Utility & system-level Python libraries
+    # ------------------------------------------------------------------
+    ephem \
+    lmdb \
+    "loguru==0.3.0" \
+    "py-trees==0.8.3" \
+    pygame \
+    shapely \
+    terminaltables \
+    tqdm \
+    xmlschema \
+    screeninfo \
+    keyboard \
+    tabulate \
+    pyglet \
+    easydict \
+    "markupsafe==2.0.1" \
+    \
+    # ------------------------------------------------------------------
+    # Simulation / environment
+    # ------------------------------------------------------------------
+    metadrive-simulator
+
+
+################################################################################################
+# Final Release stage
+# - Workspace setup
+# - Install project package
+# - Configure ROS2 environment
+################################################################################################
+FROM python-deps-stage AS release-stage
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy project and install in editable mode
+COPY pvp4real /workspace/pvp4real
+RUN cd /workspace/pvp4real && pip3 install -e .
+
+# Source ROS2 environment for interactive shells
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+
+# ROS2 environment variables
+ENV ROS_DISTRO=humble
+ENV ROS_VERSION=2
+ENV ROS_PYTHON_VERSION=3
+ENV AMENT_PREFIX_PATH=/opt/ros/humble
+ENV COLCON_PREFIX_PATH=/opt/ros/humble
+ENV LD_LIBRARY_PATH=/opt/ros/humble/lib:${LD_LIBRARY_PATH}
+ENV PATH=/opt/ros/humble/bin:${PATH}
+ENV PYTHONPATH=/opt/ros/humble/lib/python3.10/site-packages:${PYTHONPATH}
+ENV PYTHONUTF8=0
+
+# Expose port for services
+EXPOSE 8080
+
+CMD ["bash"]
