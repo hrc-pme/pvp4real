@@ -2,9 +2,19 @@ import argparse
 import os
 import uuid
 from pathlib import Path
+import multiprocessing
+
+# Ensure PYTHONUTF8 is valid before multiprocessing
+os.environ["PYTHONUTF8"] = "1"
+
+# Set multiprocessing start method to avoid fork issues in Docker
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
 
 from pvp.experiments.metadrive.egpo.fakehuman_env import FakeHumanEnv
-from pvp.eil import EIL
+from pvp.pvp_td3 import PVPTD3
 from pvp.sb3.common.callbacks import CallbackList, CheckpointCallback
 from pvp.sb3.common.monitor import Monitor
 from pvp.sb3.common.vec_env import SubprocVecEnv
@@ -17,7 +27,7 @@ from pvp.utils.utils import get_time_str
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--exp_name", default="eil_metadrive_fakehuman", type=str, help="The name for this batch of experiments."
+        "--exp_name", default="pvp_metadrive_fakehuman", type=str, help="The name for this batch of experiments."
     )
     parser.add_argument("--batch_size", default=1024, type=int)
     parser.add_argument("--learning_starts", default=10, type=int)
@@ -26,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument("--wandb", action="store_true", help="Set to True to upload stats to wandb.")
     parser.add_argument("--wandb_project", type=str, default="", help="The project name for wandb.")
     parser.add_argument("--wandb_team", type=str, default="", help="The team name for wandb.")
-    parser.add_argument("--log_dir", type=str, default="/home/zhenghao/pvp", help="Folder to store the logs.")
+    parser.add_argument("--log_dir", type=str, default="/pvp4real/logs", help="Folder to store the logs.")
     parser.add_argument("--free_level", type=float, default=0.95)
     parser.add_argument("--bc_loss_weight", type=float, default=0.0)
     parser.add_argument("--with_human_proxy_value_loss", default="True", type=str)
@@ -34,6 +44,8 @@ if __name__ == '__main__':
     parser.add_argument("--adaptive_batch_size", default="False", type=str)
     parser.add_argument("--only_bc_loss", default="False", type=str)
     parser.add_argument("--ckpt", default="", type=str)
+    parser.add_argument("--render", action="store_true", help="Enable MetaDrive 3D rendering.")
+    parser.add_argument("--checkpoint_dir", type=str, default="/pvp3real/checkpoints", help="Folder to store the checkpoints.")
     args = parser.parse_args()
 
     # ===== Set up some arguments =====
@@ -54,6 +66,8 @@ if __name__ == '__main__':
     trial_dir = experiment_dir / trial_name
     os.makedirs(experiment_dir, exist_ok=True)
     os.makedirs(trial_dir, exist_ok=False)  # Avoid overwritting old experiment
+    checkpoint_dir = Path(args.checkpoint_dir) / experiment_batch_name / trial_name
+    os.makedirs(checkpoint_dir, exist_ok=True)
     print(f"We start logging training data into {trial_dir}")
 
     free_level = args.free_level
@@ -65,7 +79,7 @@ if __name__ == '__main__':
         env_config=dict(
 
             # Original real human exp env config:
-            # use_render=True,  # Open the interface
+            use_render=args.render,  # Open the interface
             # manual_control=True,  # Allow receiving control signal from external device
             # controller=control_device,
             # window_size=(1600, 1100),
@@ -139,12 +153,12 @@ if __name__ == '__main__':
         eval_env = Monitor(env=eval_env, filename=str(trial_dir))
         return eval_env
 
-    eval_env = SubprocVecEnv([_make_eval_env])
+    eval_env = SubprocVecEnv([_make_eval_env], start_method="spawn")
 
     # ===== Setup the callbacks =====
     save_freq = args.save_freq  # Number of steps per model checkpoint
     callbacks = [
-        CheckpointCallback(name_prefix="rl_model", verbose=2, save_freq=save_freq, save_path=str(trial_dir / "models"))
+        CheckpointCallback(name_prefix="rl_model", verbose=2, save_freq=save_freq, save_path=str(checkpoint_dir))
     ]
     if use_wandb:
         callbacks.append(
@@ -159,7 +173,7 @@ if __name__ == '__main__':
     callbacks = CallbackList(callbacks)
 
     # ===== Setup the training algorithm =====
-    model = EIL(**config["algo"])
+    model = PVPTD3(**config["algo"])
     if args.ckpt:
         ckpt = Path(args.ckpt)
         print(f"Loading checkpoint from {ckpt}!")
@@ -178,7 +192,7 @@ if __name__ == '__main__':
         # eval
         eval_env=eval_env,
         eval_freq=150,
-        n_eval_episodes=1,
+        n_eval_episodes=50,
         eval_log_path=str(trial_dir),
 
         # logging
