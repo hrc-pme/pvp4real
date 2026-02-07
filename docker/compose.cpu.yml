@@ -9,9 +9,6 @@ x-common-basic: &common-basic
   network_mode: "host"
   stdin_open: true
   tty: true
-  environment:
-    DISPLAY: ${DISPLAY}
-    QT_X11_NO_MITSHM: 1
 
 x-common-ros2: &common-ros2
   volumes:
@@ -20,6 +17,9 @@ x-common-ros2: &common-ros2
     - ./services:/docker/services
   working_dir: /workspace
   environment:
+    DISPLAY: ${DISPLAY}
+    QT_X11_NO_MITSHM: 1
+    
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
     RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
 
@@ -28,6 +28,11 @@ services:
     <<: [*common-basic, *common-ros2]
     container_name: pvp4real-cpu-dev
     command: bash
+
+  hitl:
+    <<: [*common-basic, *common-ros2]
+    container_name: pvp4real-cpu-hitl
+    command: bash /docker/services/hitl.sh
 
   deploy:
     <<: [*common-basic, *common-ros2]

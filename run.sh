@@ -5,6 +5,7 @@
 #############################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ROS_DOMAIN_ID=25
 
 #############################
 # TUI Helper Functions
@@ -62,6 +63,7 @@ select_action_tui() {
   
   local menu_options=()
   menu_options+=("dev" "Development (interactive shell)")
+  menu_options+=("hitl" "Human-in-the-Loop mode")
   menu_options+=("deploy" "Deployment (application runtime)")
   menu_options+=("cb" "Build colcon workspace")
   menu_options+=("────────── " "")
@@ -127,12 +129,14 @@ Usage: $0 [action]
 action:
   build              Build Docker image
   dev                Development service (interactive shell with volumes)
-  deploy             Deploy service (application runtime)
+  hitl               Human-in-the-Loop mode (runs pvp.hitl.py)
+  deploy             Deploy service (runs pvp.deploy.py)
   cb                 Build ROS2 workspace with colcon (auto-exit after build)
 
 Examples:
   $0 build           # Build PVP4Real CPU Docker image
   $0 dev             # Start PVP4Real CPU development environment
+  $0 hitl            # Start PVP4Real HITL mode
   $0 deploy          # Start PVP4Real CPU deployment service
   $0 cb              # Build ROS2 workspace and exit
   $0                 # Interactive TUI menu mode
@@ -300,8 +304,8 @@ main() {
     action=$1
     
     # Validate inputs
-    if [ "$action" != "build" ] && [ "$action" != "dev" ] && [ "$action" != "deploy" ] && [ "$action" != "cb" ]; then
-      echo "Error: Invalid action '$action'. Must be 'build', 'dev', 'deploy', or 'cb'."
+    if [ "$action" != "build" ] && [ "$action" != "dev" ] && [ "$action" != "hitl" ] && [ "$action" != "deploy" ] && [ "$action" != "cb" ]; then
+      echo "Error: Invalid action '$action'. Must be 'build', 'dev', 'hitl', 'deploy', or 'cb'."
       usage
     fi
     

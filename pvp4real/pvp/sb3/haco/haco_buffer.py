@@ -71,7 +71,7 @@ class HACOReplayBuffer(ReplayBuffer):
         n_envs: int = 1,
         optimize_memory_usage: bool = True,
         handle_timeout_termination: bool = True,
-        discard_reward=False,
+        discard_reward=True,
         discard_takeover_start=False,
         takeover_stop_td=False
     ):

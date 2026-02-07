@@ -3,6 +3,7 @@ from typing import Dict, Union
 
 import numpy as np
 from gym import spaces
+from gymnasium import spaces as new_spaces
 
 from pvp.sb3.common.preprocessing import is_image_space, is_image_space_channels_first
 from pvp.sb3.common.vec_env.base_vec_env import VecEnv, VecEnvStepReturn, VecEnvWrapper
@@ -17,10 +18,10 @@ class VecTransposeImage(VecEnvWrapper):
     """
     def __init__(self, venv: VecEnv):
         assert is_image_space(venv.observation_space) or isinstance(
-            venv.observation_space, spaces.dict.Dict
+            venv.observation_space, (spaces.Dict, new_spaces.Dict)
         ), "The observation space must be an image or dictionary observation space"
 
-        if isinstance(venv.observation_space, spaces.dict.Dict):
+        if isinstance(venv.observation_space, (spaces.Dict, new_spaces.Dict)):
             self.image_space_keys = []
             observation_space = deepcopy(venv.observation_space)
             for key, space in observation_space.spaces.items():

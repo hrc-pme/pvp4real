@@ -10,9 +10,9 @@ if [ -f "/workspace/colcon-ws/install/setup.bash" ]; then
 fi
 
 echo '=========================================='
-echo 'Starting PVP Deployment...'
+echo 'Starting PVP HITL (Human-in-the-Loop)...'
 echo '=========================================='
 
-# Run the deployment script
+# Run the HITL script
 cd /workspace
-python3 pvp4real/scripts/pvp.deploy.py
+python3 pvp4real/scripts/pvp.hitl.py

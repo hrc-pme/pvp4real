@@ -10,6 +10,8 @@ DRIVER_PID=$!
 ros2 launch stretch_launch d435i_basic.launch.py &
 CAM_PID=$!
 
+ros2 service call /switch_to_gamepad_mode std_srvs/srv/Trigger {} &
+
 echo "[stretch3.standby.sh] Driver PID=${DRIVER_PID}, Camera PID=${CAM_PID}"
 echo "[stretch3.standby.sh] Press Ctrl-C to stop."
 
