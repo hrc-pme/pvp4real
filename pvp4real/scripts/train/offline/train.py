@@ -47,6 +47,7 @@ from tf2_msgs.msg import TFMessage
 # ── ML / gym ──────────────────────────────────────────────────────────────────
 import gymnasium as gym
 from pvp.pvp_td3 import PVPTD3
+from pvp.sb3.common.utils import configure_logger
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +104,19 @@ def read_bag(bag_dir: Path) -> Dict[str, List[Tuple[int, Any]]]:
     topic_type_map: Dict[str, str] = {}
     for meta in reader.get_all_topics_and_types():
         topic_type_map[meta.name] = meta.type
+
+    # ── Compressed image guard ────────────────────────────────────────────────
+    # Train expects raw Image topics. If bag_c (compressed) is passed directly,
+    # fail early with a clear message rather than silently producing empty frames.
+    compressed_topics = [t for t in topic_type_map if "compress" in t.lower()]
+    if compressed_topics:
+        raise ValueError(
+            f"\n[ERROR] Bag contains compressed image topics:\n"
+            + "".join(f"  {t}\n" for t in sorted(compressed_topics))
+            + "\nPlease decompress first:\n"
+            + "  python3 pvp4real/scripts/data/decompress.py\n"
+            + "Then point --bag at the resulting bag/ directory (not bag_c/)."
+        )
 
     messages: Dict[str, List[Tuple[int, Any]]] = {}
     while reader.has_next():
@@ -174,7 +188,10 @@ def build_transitions(
     """
     rgb_topic   = "/camera/camera/color/image_raw"
     depth_topic = "/camera/camera/aligned_depth_to_color/image_raw"
-    cmd_topic   = "/stretch/cmd_vel"
+    # Use cmd_vel_teleop as the timestamp anchor: cmd_vel is only published
+    # when the Authority node is running (online-only), while cmd_vel_teleop
+    # is always published by the joystick driver during recording.
+    cmd_topic   = "/stretch/cmd_vel_teleop"
     tel_topic   = "/stretch/is_teleop"
 
     cmd_series  = messages.get(cmd_topic, [])
@@ -279,6 +296,9 @@ class OfflineDummyEnv(gym.Env):
         obs = np.zeros(self.observation_space.shape, dtype=np.uint8)
         return obs, 0.0, False, False, {}
 
+    def seed(self, seed=None):
+        return [seed]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Buffer population
@@ -288,8 +308,8 @@ def fill_buffers(model: PVPTD3, transitions: List[Dict]) -> None:
     """Add offline transitions into model's human_data_buffer / replay_buffer."""
     skipped = 0
     for t in transitions:
-        obs      = t["obs"][np.newaxis]        # (1, H, W, C)
-        next_obs = t["next_obs"][np.newaxis]
+        obs      = t["obs"].transpose(2, 0, 1)[np.newaxis]       # (H,W,C) -> (1,C,H,W)
+        next_obs = t["next_obs"].transpose(2, 0, 1)[np.newaxis]  # (H,W,C) -> (1,C,H,W)
         action   = t["action"][np.newaxis]     # (1, 2)
         reward   = np.array([t["reward"]])
         done     = np.array([float(t["done"])])
@@ -303,6 +323,10 @@ def fill_buffers(model: PVPTD3, transitions: List[Dict]) -> None:
         try:
             buf.add(obs, next_obs, action, reward, done, [info])
         except Exception as e:
+            if skipped == 0:
+                import traceback
+                print(f"[fill_buffers] First skip error: {e}")
+                traceback.print_exc()
             skipped += 1
 
     human_n  = model.human_data_buffer.pos
@@ -373,19 +397,28 @@ def main() -> None:
     resume_buf   = buf_c.get("resume_from")   # path to run dir
 
     # ── Resolve bag path ──────────────────────────────────────────────────────
+    # Priority: --bag CLI > config.bag_path > auto-detect latest <run_dir>/bag
+    cfg_bag = train_c.get("bag_path")
     if args.bag:
         bag_dir = Path(args.bag)
+    elif cfg_bag:
+        p = Path(cfg_bag)
+        bag_dir = p if p.is_absolute() else PVP_ROOT / p
     else:
-        # Find the most recently recorded bag under models/offline/
-        rec_base = PVP_ROOT / ckpt_c["saved_model_path"]
+        # Auto-detect: find most recent run dir under dataset_base_path that has a bag/ subdir.
+        dataset_base = train_c.get("dataset_base_path", "datasets/offline/")
+        rec_base = PVP_ROOT / dataset_base
         candidates = sorted(
-            [d / "bag" for d in rec_base.iterdir() if d.is_dir() and d.name.isdigit()],
+            [d / "bag" for d in rec_base.iterdir()
+             if d.is_dir() and d.name.isdigit() and (d / "bag").exists()],
             reverse=True,
         )
         if not candidates:
-            print(f"[ERROR] No bags found under {rec_base}. Run record-bag.py first or pass --bag.")
+            print(f"[ERROR] No decompressed bag/ found under {rec_base}.")
+            print("        Run decompress.py first, or set training.bag_path in config.")
             sys.exit(1)
         bag_dir = candidates[0]
+        print(f"[INFO] bag_path not set, auto-detected: {bag_dir}")
 
     if not bag_dir.exists():
         print(f"[ERROR] Bag directory not found: {bag_dir}")
@@ -474,6 +507,9 @@ def main() -> None:
     # Make sure model won't skip training (learning_starts threshold)
     model.learning_starts = 0
     model.num_timesteps   = trained_steps + len(transitions)
+
+    # ── Initialize logger (required before calling model.train() directly) ────
+    model.set_logger(configure_logger(verbose=1, tensorboard_log=str(run_dir), tb_log_name="offline_pvptd3", reset_num_timesteps=True))
 
     # ── Training loop ─────────────────────────────────────────────────────────
     print(f"Starting offline training for {total_steps} gradient steps…")

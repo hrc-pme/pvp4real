@@ -15,4 +15,4 @@ echo '=========================================='
 
 # Run the bag recording script
 cd /workspace
-python3 pvp4real/scripts/record/rosbag.py
+python3 pvp4real/scripts/data/rosbag.py

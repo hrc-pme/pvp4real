@@ -316,6 +316,7 @@ def main() -> None:
             self.action_space      = gym.spaces.Box(-1.0, 1.0, shape=(2,), dtype=np.float32)
         def reset(self, **kw): return np.zeros(obs_shape, np.uint8), {}
         def step(self, a):     return np.zeros(obs_shape, np.uint8), 0.0, False, False, {}
+        def seed(self, seed=None): return [seed]
 
     dummy_env = _DummyEnv()
     model     = PVPTD3.load(str(chkpt_file), env=dummy_env, device=device)

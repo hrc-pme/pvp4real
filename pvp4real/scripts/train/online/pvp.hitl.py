@@ -250,6 +250,9 @@ class StretchHITLEnv(gym.Env):
     def _vw_to_action(self, vw: np.ndarray) -> np.ndarray:
         return np.array([vw[0] / self.max_lin, vw[1] / self.max_ang], dtype=np.float32).clip(-1.0, 1.0)
 
+    def seed(self, seed=None):
+        return [seed]
+
     def reset(self, *, seed=None, options=None):
         if seed is not None:
             np.random.seed(seed)

@@ -30,7 +30,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from rclpy.serialization import serialize_message
 
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import CompressedImage, Image, CameraInfo
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool
 from tf2_msgs.msg import TFMessage
@@ -43,14 +43,22 @@ import rosbag2_py
 # ─────────────────────────────────────────────────────────────────────────────
 
 TOPIC_TYPE_MAP: Dict[str, Tuple[str, Any]] = {
-    "/camera/camera/camera_info":                       ("sensor_msgs/msg/CameraInfo", CameraInfo),
-    "/camera/camera/color/image_raw":                   ("sensor_msgs/msg/Image",      Image),
-    "/camera/camera/aligned_depth_to_color/image_raw":  ("sensor_msgs/msg/Image",      Image),
-    "/stretch/cmd_vel_teleop":                          ("geometry_msgs/msg/Twist",    Twist),
-    "/stretch/cmd_vel":                                 ("geometry_msgs/msg/Twist",    Twist),
-    "/stretch/is_teleop":                               ("std_msgs/msg/Bool",          Bool),
-    "/tf":                                              ("tf2_msgs/msg/TFMessage",     TFMessage),
-    "/tf_static":                                       ("tf2_msgs/msg/TFMessage",     TFMessage),
+    # camera info
+    "/camera/camera/color/camera_info":                                  ("sensor_msgs/msg/CameraInfo",    CameraInfo),
+    "/camera/camera/aligned_depth_to_color/camera_info":                 ("sensor_msgs/msg/CameraInfo",    CameraInfo),
+    # raw images
+    "/camera/camera/color/image_raw":                                    ("sensor_msgs/msg/Image",          Image),
+    "/camera/camera/aligned_depth_to_color/image_raw":                   ("sensor_msgs/msg/Image",          Image),
+    # compressed images
+    "/camera/camera/color/image_raw/compressed":                         ("sensor_msgs/msg/CompressedImage", CompressedImage),
+    # "/camera/camera/aligned_depth_to_color/image_raw/compressed":        ("sensor_msgs/msg/CompressedImage", CompressedImage),
+    "/camera/camera/aligned_depth_to_color/image_raw/compressedDepth":   ("sensor_msgs/msg/CompressedImage", CompressedImage),
+    # control
+    "/stretch/cmd_vel_teleop":                                           ("geometry_msgs/msg/Twist",       Twist),
+    "/stretch/cmd_vel":                                                  ("geometry_msgs/msg/Twist",       Twist),
+    "/stretch/is_teleop":                                                ("std_msgs/msg/Bool",             Bool),
+    "/tf":                                                               ("tf2_msgs/msg/TFMessage",        TFMessage),
+    "/tf_static":                                                        ("tf2_msgs/msg/TFMessage",        TFMessage),
 }
 
 PVP_ROOT = Path(__file__).parent.parent.parent  # pvp4real/pvp4real/
@@ -87,8 +95,10 @@ class RecorderNode(Node):
 
     def __init__(self, topics: list[str]):
         super().__init__("pvp_bag_recorder")
-        self._latest: Dict[str, Optional[Tuple[int, Any]]] = {t: None for t in topics}
-
+        self._latest: Dict[str, Optional[Tuple[int, int, Any]]] = {t: None for t in topics}
+        self._last_bag_ts: Dict[str, int] = {}
+        self._lock = threading.Lock()
+        
         qos_sensor = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
@@ -107,7 +117,7 @@ class RecorderNode(Node):
                 self.get_logger().warn(f"Unknown topic type for {topic}, skipping.")
                 continue
             _, msg_cls = TOPIC_TYPE_MAP[topic]
-            qos = qos_sensor if ("image" in topic or "camera_info" in topic) else qos_default
+            qos = qos_sensor if ("image" in topic or "compressed" in topic or "compressedDepth" in topic or "camera_info" in topic) else qos_default
             self.create_subscription(
                 msg_cls, topic,
                 lambda msg, t=topic: self._cache(t, msg),
@@ -115,12 +125,31 @@ class RecorderNode(Node):
             )
 
     def _cache(self, topic: str, msg: Any) -> None:
-        ts_ns = self.get_clock().now().nanoseconds
-        self._latest[topic] = (ts_ns, msg)
+        now_ns = self.get_clock().now().nanoseconds
 
-    def get_latest(self) -> Dict[str, Optional[Tuple[int, Any]]]:
-        return dict(self._latest)
+        # Prefer sensor stamp, else fallback to now
+        bag_ts_ns = now_ns
+        if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
+            s = msg.header.stamp
+            cand = s.sec * 1_000_000_000 + s.nanosec
+            # If stamp is 0 or clearly invalid, fallback to now
+            if cand > 0:
+                bag_ts_ns = cand
 
+        # Enforce strictly increasing timestamps per topic (Foxglove-friendly)
+        last = self._last_bag_ts.get(topic)
+        if last is not None and bag_ts_ns <= last:
+            bag_ts_ns = last + 1
+        self._last_bag_ts[topic] = bag_ts_ns
+
+        recv_ts_ns = now_ns
+        with self._lock:
+          self._latest[topic] = (bag_ts_ns, recv_ts_ns, msg)
+
+    def get_latest(self) -> Dict[str, Optional[Tuple[int, int, Any]]]:
+        # return a snapshot copy for writer thread
+        with self._lock:
+            return dict(self._latest)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Recording session
@@ -130,18 +159,20 @@ class RecordingSession:
     """Manages a single .mcap recording session."""
 
     def __init__(self, run_dir: Path, topics: list[str], frequency: float, node: RecorderNode):
-        self._run_dir    = run_dir
-        self._topics     = topics
-        self._period     = 1.0 / frequency
-        self._node       = node
-        self._tick_count = 0
-        self._running    = False
+        self._run_dir       = run_dir
+        self._topics        = topics
+        self._period        = 1.0 / frequency
+        self._node          = node
+        self._tick_count    = 0
+        self._running       = False
         self._writer: Optional[rosbag2_py.SequentialWriter] = None
         self._thread: Optional[threading.Thread] = None
+        # Dedup by reception clock (not header.stamp) to handle raw Image with stamp=0.
+        self._last_recv_ts: Dict[str, int] = {}
 
     def start(self) -> None:
         self._run_dir.mkdir(parents=True, exist_ok=True)
-        storage_opts = rosbag2_py.StorageOptions(uri=str(self._run_dir / "bag"), storage_id="mcap")
+        storage_opts = rosbag2_py.StorageOptions(uri=str(self._run_dir / "bag_c"), storage_id="mcap")
         conv_opts    = rosbag2_py.ConverterOptions("", "")
 
         self._writer = rosbag2_py.SequentialWriter()
@@ -165,6 +196,19 @@ class RecordingSession:
             self._thread.join(timeout=5.0)
         self._writer = None  # closes the writer
 
+        # Rename the .mcap file to {steps:05d}.mcap and update metadata.yaml
+        bag_dir = self._run_dir / "bag_c"
+        if bag_dir.exists():
+            mcap_files = sorted(bag_dir.glob("*.mcap"))
+            if mcap_files:
+                new_name = f"{self._tick_count:05d}.mcap"
+                mcap_files[0].rename(bag_dir / new_name)
+                meta_path = bag_dir / "metadata.yaml"
+                if meta_path.exists():
+                    text = meta_path.read_text()
+                    text = text.replace(mcap_files[0].name, new_name)
+                    meta_path.write_text(text)
+
     def _loop(self) -> None:
         while self._running:
             t0 = time.monotonic()
@@ -180,9 +224,13 @@ class RecordingSession:
         for topic, data in self._node.get_latest().items():
             if data is None:
                 continue
-            ts_ns, msg = data
+            bag_ts_ns, recv_ts_ns, msg = data
+            # Skip if this exact reception hasn't changed (same message as last tick).
+            if self._last_recv_ts.get(topic) == recv_ts_ns:
+                continue
             try:
-                self._writer.write(topic, serialize_message(msg), ts_ns)
+                self._writer.write(topic, serialize_message(msg), bag_ts_ns)
+                self._last_recv_ts[topic] = recv_ts_ns
                 written += 1
             except Exception as e:
                 self._node.get_logger().warn(f"Write error on {topic}: {e}")
