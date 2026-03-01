@@ -25,4 +25,4 @@ record:
 decompress:
   # Path to the run directory to decompress (relative to pvp4real/pvp4real/)
   # e.g. "datasets/offline/0002" → reads 0002/bag_c, writes 0002/bag
-  target_bag_path: "datasets/offline/0001"
+  target_bag_path: "datasets/offline/0006"
