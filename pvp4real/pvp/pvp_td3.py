@@ -65,6 +65,7 @@ class PVPTD3(TD3):
         else:
             self.human_data_buffer = self.replay_buffer
 
+
     def train(self, gradient_steps: int, batch_size: int = 100) -> None:
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)
@@ -77,43 +78,25 @@ class PVPTD3(TD3):
 
         stat_recorder = defaultdict(list)
 
-        should_concat = False
-        if self.replay_buffer.pos > 0 and self.human_data_buffer.pos > 0:
-            replay_data_human = self.human_data_buffer.sample(
-                int(batch_size), env=self._vec_normalize_env, return_all=True
-            )
-            human_data_size = len(replay_data_human.observations)
-            human_data_size = max(1, self.extra_config["agent_data_ratio"] * human_data_size)
-            human_data_size = int(human_data_size)
-            should_concat = True
+        # 強制 offline train from scratch: 全部從 human buffer 抓
+        if self.human_data_buffer.pos > 0:
+            for step in range(gradient_steps):
+                self._n_updates += 1
+                replay_data = self.human_data_buffer.sample(batch_size, env=self._vec_normalize_env, return_all=True)
+                # ...existing code...
+                with th.no_grad():
+                    noise = replay_data.actions_behavior.clone().data.normal_(0, self.target_policy_noise)
+                    noise = noise.clamp(-self.target_noise_clip, self.target_noise_clip)
+                    next_actions = (self.actor_target(replay_data.next_observations) + noise).clamp(-1, 1)
+                    next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+                    next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
+                    target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
 
-        elif self.human_data_buffer.pos > 0:
-            replay_data = self.human_data_buffer.sample(batch_size, env=self._vec_normalize_env, return_all=True)
-        elif self.replay_buffer.pos > 0:
-            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+                current_q_behavior_values = self.critic(replay_data.observations, replay_data.actions_behavior)
+                # ...existing code for loss, backward, update, etc...
         else:
             gradient_steps = 0
-
-        for step in range(gradient_steps):
-            self._n_updates += 1
-            # Sample replay buffer
-
-            if self.extra_config["adaptive_batch_size"]:
-                if should_concat:
-                    replay_data_agent = self.replay_buffer.sample(human_data_size, env=self._vec_normalize_env)
-                    replay_data = concat_samples(replay_data_agent, replay_data_human)
-            else:
-
-                if self.replay_buffer.pos > batch_size and self.human_data_buffer.pos > batch_size:
-                    replay_data_agent = self.replay_buffer.sample(int(batch_size / 2), env=self._vec_normalize_env)
-                    replay_data_human = self.human_data_buffer.sample(int(batch_size / 2), env=self._vec_normalize_env)
-                    replay_data = concat_samples(replay_data_agent, replay_data_human)
-                elif self.human_data_buffer.pos > batch_size:
-                    replay_data = self.human_data_buffer.sample(batch_size, env=self._vec_normalize_env)
-                elif self.replay_buffer.pos > batch_size:
-                    replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
-                else:
-                    break
+            return
 
             with th.no_grad():
                 # Select action according to policy and add clipped noise

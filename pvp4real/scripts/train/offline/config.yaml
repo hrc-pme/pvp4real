@@ -39,30 +39,37 @@ training:
   # is_resume_training: True  → must provide checkpoint.resume_from (+ optionally buffer.resume_from)
   is_resume_training: false
 
-  # Path to the decompressed bag directory (relative to pvp4real/pvp4real/, or absolute).
-  # e.g. "datasets/offline/0001/bag"
-  # null → auto-detect the latest <dataset_base_path>/<run>/bag.
-  bag_path: "datasets/offline/0001/bag"
+  # Path(s) to the decompressed bag directories (relative to pvp4real/pvp4real/, or absolute).
+  # 可為單一路徑或多個路徑 list。
+  # e.g. ["datasets/offline/0001/bag", "datasets/offline/0002/bag", ...]
+  # null → auto-detect the latest <dataset_base_path>/<run>/bag。
+  bag_path:
+    - "datasets/offline/0001/bag"
+    - "datasets/offline/0002/bag"
+    - "datasets/offline/0003/bag"
+    - "datasets/offline/0004/bag"
+    - "datasets/offline/0005/bag"
+    - "datasets/offline/0006/bag"
   dataset_base_path: "datasets/offline/"   # used for bag auto-detection when bag_path is null
 
-  total_steps: 50000
+  total_steps: 15000
   learning_starts: 500
   batch_size: 128
   log_interval: 10
 
   # Set true to save Q-value gap analytics (Qbehavior, Qnovice, gap折線圖)
-  save_analytic_graph: false
+  save_analytic_graph: true
 
   checkpoint:
     is_saved: true
-    save_every: 100          # steps
+    save_every: 5000          # steps
     saved_model_path: "models/offline/"
     resume_from: null        # e.g. "models/offline/0002/chkpt-5000.zip", required when is_resume_training=true
     overwrite: true          # overwrite existing file with same serial number
 
   buffer:
     size: 10000              # capacity for each of human_buffer & replay_buffer
-    save_every: 100          # steps
+    save_every: 15000        # steps
     saved_buffer_path: "models/offline/"
     resume_from: null        # e.g. "models/offline/0002", optional
     overwrite: true
@@ -74,6 +81,7 @@ training:
     with_agent_proxy_value_loss: false  # OFF: novice==behavior in offline data → gradient conflict
     only_bc_loss: false
     add_bc_loss: true
+    agent_data_ratio: 0.0  # offline human-only，無 agent data
     gamma: 0.99
     tau: 0.05
     learning_rate: 0.0001

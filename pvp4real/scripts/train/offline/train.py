@@ -398,14 +398,20 @@ def main() -> None:
 
     # ── Resolve bag path ──────────────────────────────────────────────────────
     # Priority: --bag CLI > config.bag_path > auto-detect latest <run_dir>/bag
+
     cfg_bag = train_c.get("bag_path")
+    bag_dirs = []
     if args.bag:
-        bag_dir = Path(args.bag)
+        bag_dirs = [Path(args.bag)]
     elif cfg_bag:
-        p = Path(cfg_bag)
-        bag_dir = p if p.is_absolute() else PVP_ROOT / p
+        # 支援 list 或單一路徑
+        if isinstance(cfg_bag, list):
+            bag_dirs = [Path(p) if Path(p).is_absolute() else PVP_ROOT / p for p in cfg_bag]
+        else:
+            p = Path(cfg_bag)
+            bag_dirs = [p if p.is_absolute() else PVP_ROOT / p]
     else:
-        # Auto-detect: find most recent run dir under dataset_base_path that has a bag/ subdir.
+        # Auto-detect: find most recent run dir under dataset_base_path that has a bag/ subdir。
         dataset_base = train_c.get("dataset_base_path", "datasets/offline/")
         rec_base = PVP_ROOT / dataset_base
         candidates = sorted(
@@ -417,13 +423,15 @@ def main() -> None:
             print(f"[ERROR] No decompressed bag/ found under {rec_base}.")
             print("        Run decompress.py first, or set training.bag_path in config.")
             sys.exit(1)
-        bag_dir = candidates[0]
-        print(f"[INFO] bag_path not set, auto-detected: {bag_dir}")
+        bag_dirs = [candidates[0]]
+        print(f"[INFO] bag_path not set, auto-detected: {bag_dirs[0]}")
 
-    if not bag_dir.exists():
-        print(f"[ERROR] Bag directory not found: {bag_dir}")
-        sys.exit(1)
-    print(f"Reading bag: {bag_dir}")
+    # 檢查所有 bag 目錄
+    for bag_dir in bag_dirs:
+        if not bag_dir.exists():
+            print(f"[ERROR] Bag directory not found: {bag_dir}")
+            sys.exit(1)
+    print(f"Reading bags: {[str(b) for b in bag_dirs]}")
 
     # ── Create run directory ──────────────────────────────────────────────────
     model_base = PVP_ROOT / ckpt_c["saved_model_path"]
@@ -431,11 +439,14 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Run directory: {run_dir}")
 
-    # ── Read bag and build transitions ────────────────────────────────────────
-    messages    = read_bag(bag_dir)
-    transitions = build_transitions(
-        messages, stack_n, resize_hw, depth_max_m, max_lin, max_ang
-    )
+    # ── Read bags and build transitions ───────────────────────────────────────
+    all_transitions = []
+    for bag_dir in bag_dirs:
+        messages = read_bag(bag_dir)
+        transitions = build_transitions(
+            messages, stack_n, resize_hw, depth_max_m, max_lin, max_ang
+        )
+        all_transitions.extend(transitions)
 
     # ── Build env (space definition only) ────────────────────────────────────
     obs_shape = (resize_hw[0], resize_hw[1], stack_n * 4)
@@ -486,6 +497,7 @@ def main() -> None:
             with_agent_proxy_value_loss=str(pvp_c["with_agent_proxy_value_loss"]),
             only_bc_loss=str(pvp_c["only_bc_loss"]),
             add_bc_loss=str(pvp_c["add_bc_loss"]),
+            agent_data_ratio=float(pvp_c.get("agent_data_ratio", 0.0)),
             adaptive_batch_size="False",
         )
 
@@ -500,9 +512,10 @@ def main() -> None:
         else:
             print(f"[WARN] No buffer .pkl files found in {buf_run_dir}. Starting with empty buffers.")
 
-    # ── Fill buffers from bag ─────────────────────────────────────────────────
-    print("Filling buffers from bag data…")
-    fill_buffers(model, transitions)
+
+    # ── Fill buffers from all bags ────────────────────────────────────────────
+    print("Filling buffers from all bag data…")
+    fill_buffers(model, all_transitions)
 
     # Make sure model won't skip training (learning_starts threshold)
     model.learning_starts = 0
@@ -516,6 +529,7 @@ def main() -> None:
     step = 0
     save_interval = min(chkpt_save_every, buf_save_every)
 
+
     try:
         while step < total_steps:
             chunk = min(save_interval, total_steps - step)
@@ -524,12 +538,16 @@ def main() -> None:
             model.num_timesteps += chunk
 
             abs_step = trained_steps + step
-            print(f"  Step {abs_step} ({step}/{total_steps})")
+            # 每 1000 step 輸出 log
+            if abs_step % 1000 == 0 or step == total_steps:
+                print(f"  Step {abs_step} ({step}/{total_steps})")
 
             if ckpt_c["is_saved"] and step % chkpt_save_every == 0:
                 save_checkpoint(model, run_dir, abs_step)
+                print(f"Checkpoint saved: {run_dir}/chkpt-{abs_step}.zip")
             if buf_c.get("save_every") and step % buf_save_every == 0:
                 save_buffers(model, run_dir, abs_step)
+                print(f"Buffer saved: {run_dir}/buffer_human-{abs_step}.pkl, {run_dir}/buffer_replay-{abs_step}.pkl")
 
     except KeyboardInterrupt:
         abs_step = trained_steps + step
