@@ -1,9 +1,9 @@
 x-common-basic: &common-basic
   build:
     context: ..
-    dockerfile: docker/dockerfile.gpu.cu124
+    dockerfile: docker/dockerfile.cu124.sm90
     target: release-stage
-  image: pomelo925/pvp4real:gpu-cu124
+  image: pomelo925/pvp4real:cu124-sm90
   privileged: true
   stop_grace_period: 1s
   network_mode: "host"
@@ -42,25 +42,25 @@ x-common-ros2: &common-ros2
 services:
   dev:
     <<: [*common-basic, *common-ros2]
-    container_name: pvp4real-gpu-cu124-dev
+    container_name: pvp4real-cu124-sm90-dev
     command: bash
 
   online:
     <<: [*common-basic, *common-ros2]
-    container_name: pvp4real-gpu-cu124-online
+    container_name: pvp4real-cu124-sm90-online
     command: bash /docker/services/online.sh
 
   deploy:
     <<: [*common-basic, *common-ros2]
-    container_name: pvp4real-gpu-cu124-deploy
+    container_name: pvp4real-cu124-sm90-deploy
     command: bash /docker/services/deploy.sh
 
   record:
     <<: [*common-basic, *common-ros2]
-    container_name: pvp4real-gpu-cu124-record
+    container_name: pvp4real-cu124-sm90-record
     command: bash /docker/services/record.sh
 
   cb:
     <<: [*common-basic, *common-ros2]
-    container_name: pvp4real-gpu-cu124-cb
+    container_name: pvp4real-cu124-sm90-cb
     command: bash /docker/services/cb.sh

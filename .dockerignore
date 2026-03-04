@@ -1,0 +1,46 @@
+# git / caches
+**/.git
+**/.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# python venv / local env
+**/.venv
+**/venv
+**/env
+
+# logs / experiments
+**/wandb
+**/tensorboard
+**/*.log
+**/logs
+**/runs
+
+# datasets / rosbag / videos
+**/datasets
+**/*.bag
+**/*.mcap
+**/bag
+**/bag_c
+**/rosbag*
+**/data
+**/videos
+
+# checkpoints / models
+**/checkpoints
+**/*.pt
+**/*.pth
+**/*.ckpt
+**/*.onnx
+
+# build artifacts
+**/build
+**/dist
+**/*.egg-info
+**/.idea
+**/.vscode
