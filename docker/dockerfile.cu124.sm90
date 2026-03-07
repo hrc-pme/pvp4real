@@ -1,16 +1,19 @@
 ################################################################################################
 # Base stage
-# - ROS2 Humble Desktop base (Ubuntu 22.04, Python 3.10)
+# - NVIDIA CUDA 12.4 with cuDNN (Ubuntu 22.04, Python 3.10)
 # - System dependencies and tooling
-# - Remove apt-installed sympy to avoid pip uninstall conflicts
+#
+# NOTE: Stable PyTorch whl/cu124 compiles for sm_50 – sm_90 (up to Hopper / H100).
+#       Use dockerfile.cu128.sm120 for Blackwell (RTX 50-series, sm_120+).
 ################################################################################################
-FROM osrf/ros:humble-desktop AS base-stage
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS base-stage
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
-
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 
 # Install system dependencies
 RUN apt update && apt install -y --no-install-recommends \
@@ -27,16 +30,9 @@ RUN apt update && apt install -y --no-install-recommends \
     vim \
     wget \
     curl \
-    \
-    # ROS2 Humble DDS middleware
-    ros-humble-rmw-cyclonedds-cpp \
-    ros-humble-rosidl-generator-dds-idl \
-    \
-    # ROS2 bag mcap storage plugin
-    ros-humble-rosbag2-storage-mcap \
-    \
-    # ROS2 cv_bridge for image conversion
-    ros-humble-cv-bridge \
+    gnupg2 \
+    lsb-release \
+    software-properties-common \
     \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,13 +41,37 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 
 
 ################################################################################################
+# ROS stage
+# - ROS2 Humble Base
+# - DDS middleware
+################################################################################################
+FROM base-stage AS ros-stage
+
+# Set up ROS2 Humble repository
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# Install ROS2 Humble Base and DDS middleware
+RUN apt update && apt install -y --no-install-recommends \
+    ros-humble-base \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rosidl-generator-dds-idl \
+    ros-humble-rosbag2-storage-mcap \    ros-humble-cv-bridge \    && rm -rf /var/lib/apt/lists/*
+
+
+################################################################################################
 # Python dependencies stage
-# - Core ML / RL / simulation dependencies
+# - Core ML / RL / simulation dependencies with CUDA support
+# - PyTorch with CUDA 12.4 support
 # - MetaDrive simulator
 ################################################################################################
-FROM base-stage AS python-deps-stage
+FROM ros-stage AS python-deps-stage
 
 RUN apt purge -y python3-sympy || true
+
+# Install PyTorch with CUDA 12.4 support
+RUN pip3 install --no-cache-dir \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 RUN pip3 install --no-cache-dir \
     \
@@ -60,7 +80,6 @@ RUN pip3 install --no-cache-dir \
     # ------------------------------------------------------------
     numpy==1.26.4 \
     "scipy<1.15" \
-    torch \
     \
     # ------------------------------------------------------------
     # RL / environment interface

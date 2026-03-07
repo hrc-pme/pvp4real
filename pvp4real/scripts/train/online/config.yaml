@@ -13,15 +13,16 @@ ros2_topics:
 # Common observation / control parameters
 common:
   hz: 5.0
-  max_lin: 2.0         # 線速度上限 2 m/s
-  max_ang: 1.5708      # 角速度上限 90 deg/s (約 1.5708 rad/s)
+  max_lin: 0.3460      # 線速度上限 (from 2F/bag_c dataset)
+  max_ang: 0.7391      # 角速度上限 (from 2F/bag_c dataset)
+  action_scale: 1.0    # multiply model output by this factor before publishing cmd_vel
   depth_max_m: 5.0
   stack_n: 5
   resize:
     height: 84
     width: 84
   seed: 0
-  device: "auto"
+  device: "auto"        # "auto" → cuda if available, else cpu
 
 # Training settings (pvp.hitl.py)
 training:
@@ -30,7 +31,7 @@ training:
   is_resume_training: true
 
   total_steps: 50000
-  learning_starts: 500
+  learning_starts: 20
   batch_size: 128
   log_interval: 10
 
@@ -39,7 +40,7 @@ training:
 
   checkpoint:
     is_saved: true
-    save_every: 100          # steps
+    save_every: 1000          # steps
     saved_model_path: "/workspace/pvp4real/models/online/"
     resume_from: "/workspace/pvp4real/models/offline/0001/chkpt-15000f.zip"        # path to .zip file, required when is_resume_training=true
     overwrite: true
@@ -48,7 +49,7 @@ training:
 
   buffer:
     size: 10000              # capacity for each of human_buffer & replay_buffer
-    save_every: 100          # steps
+    save_every: 1000          # steps
     saved_buffer_path: "/workspace/pvp4real/models/online/"
     resume_from: "/workspace/pvp4real/models/offline/0001/buffer_human-15000f.pkl"        # optional
     overwrite: true

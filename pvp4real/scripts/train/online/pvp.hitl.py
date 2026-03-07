@@ -32,6 +32,7 @@ from tkinter import ttk
 import numpy as np
 import yaml
 import cv2
+import torch
 
 import rclpy
 from rclpy.node import Node
@@ -237,12 +238,13 @@ class HITLCache(Node):
 
 class StretchHITLEnv(gym.Env):
 
-    def __init__(self, node: HITLCache, dt: float, max_lin: float, max_ang: float):
+    def __init__(self, node: HITLCache, dt: float, max_lin: float, max_ang: float, action_scale: float = 1.0):
         super().__init__()
-        self.node    = node
-        self.dt      = float(dt)
-        self.max_lin = float(max_lin)
-        self.max_ang = float(max_ang)
+        self.node         = node
+        self.dt           = float(dt)
+        self.max_lin      = float(max_lin)
+        self.max_ang      = float(max_ang)
+        self.action_scale = float(action_scale)
         self._last_step_t = _now()
 
         h, w = node.obs_cfg.resize_hw
@@ -252,7 +254,11 @@ class StretchHITLEnv(gym.Env):
 
     def _action_to_vw(self, a: np.ndarray) -> np.ndarray:
         a = np.clip(a.astype(np.float32), -1.0, 1.0)
-        return np.array([a[0] * self.max_lin, a[1] * self.max_ang], dtype=np.float32)
+        return np.array(
+            [a[0] * self.max_lin * self.action_scale,
+             a[1] * self.max_ang * self.action_scale],
+            dtype=np.float32,
+        )
 
     def _vw_to_action(self, vw: np.ndarray) -> np.ndarray:
         return np.array([vw[0] / self.max_lin, vw[1] / self.max_ang], dtype=np.float32).clip(-1.0, 1.0)
@@ -319,10 +325,13 @@ class HITLControlGUI:
         self.training_started = False
         self.training_stopped = False
 
+        self._train_thread: Optional[threading.Thread] = None
+
         self.root = tk.Tk()
         self.root.title("PVP4Real — Online HITL Training")
-        self.root.geometry("520x370")
-        self.root.resizable(False, False)
+        self.root.geometry("960x640")
+        self.root.minsize(720, 480)
+        self.root.resizable(True, True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
 
         self._build_ui()
@@ -349,11 +358,12 @@ class HITLControlGUI:
         ttk.Label(sf, text="Total:").grid(row=2, column=0, sticky="w")
         ttk.Label(sf, text=str(self.total_steps)).grid(row=2, column=1, sticky="w", padx=6)
 
-        self._pbar = ttk.Progressbar(sf, length=460, mode="determinate", maximum=self.total_steps)
-        self._pbar.grid(row=3, column=0, columnspan=2, pady=(8, 2))
+        self._pbar = ttk.Progressbar(sf, mode="determinate", maximum=self.total_steps)
+        self._pbar.grid(row=3, column=0, columnspan=2, pady=(8, 2), sticky="ew")
         self._pct_lbl = ttk.Label(sf, text="0.0%")
         self._pct_lbl.grid(row=4, column=0, columnspan=2)
 
+        sf.columnconfigure(0, weight=1)
         sf.columnconfigure(1, weight=1)
 
         # Mode frame
@@ -376,7 +386,12 @@ class HITLControlGUI:
         ttk.Button(btn_frame, text="Save & Quit", width=16, command=self._on_quit).grid(row=0, column=2, padx=6)
 
         self._status_lbl = ttk.Label(r, text="Waiting to start...", font=("Arial", 10, "italic"), foreground="blue")
-        self._status_lbl.grid(row=4, column=0, columnspan=2)
+        self._status_lbl.grid(row=4, column=0, columnspan=2, pady=(4, 10))
+
+        # Allow window to resize horizontally
+        r.columnconfigure(0, weight=1)
+        r.rowconfigure(1, weight=1)
+
     def _on_start(self) -> None:
         self.training_started = True
         self.training_stopped = False
@@ -388,8 +403,6 @@ class HITLControlGUI:
         self.training_stopped = True
         self._stop_btn.config(state="disabled")
         self._status_lbl.config(text="Training stopped. You may Save & Quit.", foreground="red")
-
-        r.columnconfigure(0, weight=1)
 
     def _on_mode_switch(self) -> None:
         import subprocess
@@ -418,7 +431,21 @@ class HITLControlGUI:
 
     def _on_quit(self) -> None:
         self.quit_requested = True
-        self.root.quit()
+        thread_alive = (
+            self._train_thread is not None and self._train_thread.is_alive()
+        )
+        if not thread_alive:
+            # No active training thread — safe to quit the mainloop immediately.
+            self.root.quit()
+        else:
+            # Tell the training thread to stop.  It will save and then call
+            # root.quit() itself via gui.root.after(0, gui.root.quit).
+            self._status_lbl.config(
+                text="Stopping training & saving… please wait.",
+                foreground="orange",
+            )
+            self._stop_btn.config(state="disabled")
+            self._start_btn.config(state="disabled")
 
     def update_steps(self, steps: int) -> None:
         """Thread-safe: schedules the UI update on the main (Tk) thread."""
@@ -441,6 +468,7 @@ class HITLControlGUI:
         """Run *target* in a background thread; mainloop stays on the calling (main) thread."""
         t = threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True)
         t.start()
+        self._train_thread = t
         return t
 
 
@@ -466,11 +494,14 @@ def main() -> None:
     hz           = float(common["hz"])
     max_lin      = float(common["max_lin"])
     max_ang      = float(common["max_ang"])
+    action_scale = float(common.get("action_scale", 1.0))
     depth_max_m  = float(common["depth_max_m"])
     stack_n      = int(common["stack_n"])
     resize_hw    = (int(common["resize"]["height"]), int(common["resize"]["width"]))
     seed         = int(common["seed"])
-    device       = str(common["device"])
+    _device_cfg  = str(common["device"])
+    device       = ("cuda" if torch.cuda.is_available() else "cpu") if _device_cfg == "auto" else _device_cfg
+    print(f"[device] config={_device_cfg!r}  →  using '{device}'")
 
     is_resume       = bool(train_c["is_resume_training"])
     total_steps     = int(train_c["total_steps"])
@@ -503,7 +534,7 @@ def main() -> None:
         node    = HITLCache(obs_cfg)
 
         dt  = 1.0 / hz
-        env = StretchHITLEnv(node=node, dt=dt, max_lin=max_lin, max_ang=max_ang)
+        env = StretchHITLEnv(node=node, dt=dt, max_lin=max_lin, max_ang=max_ang, action_scale=action_scale)
 
         trained = 0
 
@@ -595,22 +626,52 @@ def main() -> None:
 
                     node.get_logger().info(f"Step {trained}/{total_steps}")
 
-                # Final save
-                save_checkpoint(model, run_dir, trained, final=True)
+                # ── Final save (on stop / quit / completion) ──────────────────
+                def _set_saving():
+                    gui._status_lbl.config(
+                        text=f"Saving {trained}f checkpoint & buffer… please wait.",
+                        foreground="orange",
+                    )
+                gui.root.after(0, _set_saving)
+
+                chkpt_path = save_checkpoint(model, run_dir, trained, final=True, custom_path=save_chkpt_path)
                 save_buffers(model, run_dir, trained, final=True, custom_human_path=save_buffer_human_path, custom_replay_path=save_buffer_replay_path)
-                node.get_logger().info(f"Training complete. Saved in: {run_dir}")
-            finally:
-                # Tell the GUI mainloop to exit when training finishes
-                gui.root.after(0, gui.root.quit)
+                node.get_logger().info(f"Final save complete ({trained}f). Saved in: {run_dir}")
+
+                def _set_saved():
+                    gui._status_lbl.config(
+                        text=f"Saved {trained}f checkpoint & buffer. Closing…",
+                        foreground="blue",
+                    )
+                    gui.root.after(800, gui.root.quit)
+                gui.root.after(0, _set_saved)
+
+            except Exception as exc:
+                import traceback
+                err_msg = traceback.format_exc()
+                node.get_logger().error(f"[_training_loop] CRASHED:\n{err_msg}")
+                # Show error in GUI on main thread; do NOT close the window automatically
+                def _show_error():
+                    gui._status_lbl.config(
+                        text=f"ERROR: {exc}",
+                        foreground="red",
+                    )
+                    gui._stop_btn.config(state="disabled")
+                gui.root.after(0, _show_error)
 
         gui.start_training_thread(_training_loop)
         gui.root.mainloop()  # must run on the main thread
 
     except KeyboardInterrupt:
-        node.get_logger().info("[Interrupted] Saving checkpoint…")
-        if "model" in dir() and "trained" in dir() and trained > 0:
-            save_checkpoint(model, run_dir, trained, final=True, custom_path=save_chkpt_path)
-            save_buffers(model, run_dir, trained, final=True, custom_human_path=save_buffer_human_path, custom_replay_path=save_buffer_replay_path)
+        node.get_logger().info("[Interrupted] Signalling training thread to stop and save…")
+        if gui is not None:
+            gui.quit_requested = True
+        # Wait for the training thread to finish its current learn() chunk and
+        # save before we tear down ROS.  60 s is a generous upper bound.
+        if gui is not None and gui._train_thread is not None and gui._train_thread.is_alive():
+            gui._train_thread.join(timeout=60.0)
+            if gui._train_thread.is_alive():
+                node.get_logger().warning("[Interrupted] Training thread did not finish in time — forcing exit.")
 
     finally:
         if gui is not None:

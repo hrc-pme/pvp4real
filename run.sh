@@ -102,14 +102,14 @@ select_action_tui() {
 # TUI menu for selecting platform (cpu/gpu)
 select_platform_tui() {
   local tui_tool=$1
-  local menu_options=("cpu" "CPU (default)" "gpu-cu124" "GPU (CUDA 12.4)")
+  local menu_options=("cpu" "CPU (default)" "cu124-sm90" "GPU (CUDA 12.4, sm_50–sm_90)" "cu128-sm120" "GPU (CUDA 12.8 + sm_120 / Blackwell)")
   local selection
   if [ "$tui_tool" = "dialog" ]; then
     selection=$(DIALOGRC=/dev/null dialog --colors \
       --backtitle "PVP4Real Docker Manager" \
       --title " Select Platform " \
       --cancel-label "Back" \
-      --menu "\nWhich platform do you want to use?" 12 60 2 \
+      --menu "\nWhich platform do you want to use?" 14 70 3 \
       "${menu_options[@]}" \
       2>&1 >/dev/tty)
   elif [ "$tui_tool" = "whiptail" ]; then
@@ -117,7 +117,7 @@ select_platform_tui() {
       --backtitle "PVP4Real Docker Manager" \
       --title " Select Platform " \
       --cancel-button "Back" \
-      --menu "\nWhich platform do you want to use?" 12 60 2 \
+      --menu "\nWhich platform do you want to use?" 14 70 3 \
       "${menu_options[@]}" \
       3>&1 1>&2 2>&3)
   fi
@@ -134,8 +134,10 @@ show_summary_tui() {
   local action=$2
   local compose_file=$3
   local docker_image="pomelo925/pvp4real:latest"
-  if [[ "$compose_file" == *gpu* ]]; then
-    docker_image="pomelo925/pvp4real:gpu-cu124"
+  if [[ "$compose_file" == *sm120* ]]; then
+    docker_image="pomelo925/pvp4real:cu128-sm120"
+  elif [[ "$compose_file" == *sm90* ]]; then
+    docker_image="pomelo925/pvp4real:cu124-sm90"
   fi
   local message="Configuration Summary:\n\n"
   message+="Action: $action\n"
@@ -163,17 +165,20 @@ action:
   cb                 Build ROS2 workspace with colcon (auto-exit after build)
 
 Examples:
-  $0 build cpu       # Build PVP4Real CPU Docker image
-  $0 dev gpu-cu124   # Start PVP4Real GPU development environment
-  $0 online cpu      # Start PVP4Real Online Training / HITL mode (CPU)
-  $0 deploy gpu-cu124 # Start PVP4Real GPU deployment service
-  $0 record cpu      # Record ROS2 bag
-  $0 cb cpu          # Build ROS2 workspace and exit
-  $0                 # Interactive TUI menu mode
+  $0 build cpu          # Build PVP4Real CPU Docker image
+  $0 dev cu124-sm90     # Start development environment (GPU, up to Hopper/H100)
+  $0 dev cu128-sm120    # Start development environment (Blackwell / RTX 50-series)
+  $0 online cpu         # Start PVP4Real Online Training / HITL mode (CPU)
+  $0 online cu124-sm90  # Start Online Training (GPU, up to sm_90)
+  $0 online cu128-sm120 # Start Online Training with sm_120 GPU support
+  $0 deploy cu124-sm90  # Start PVP4Real GPU deployment service
+  $0 record cpu         # Record ROS2 bag
+  $0 cb cpu             # Build ROS2 workspace and exit
+  $0                    # Interactive TUI menu mode
 
 Configuration:
-  Docker files: docker/dockerfile.cpu, docker/dockerfile.gpu.cu124
-  Compose files: docker/compose.cpu.yml, docker/compose.gpu.cu124.yml
+  Docker files: docker/dockerfile.cpu, docker/dockerfile.cu124.sm90, docker/dockerfile.cu128.sm120
+  Compose files: docker/compose.cpu.yml, docker/compose.cu124.sm90.yml, docker/compose.cu128.sm120.yml
   Services: dev, online, deploy, record, cb
   Workspace: workspace/ (mounted to /workspace in container)
 EOF
@@ -195,7 +200,7 @@ build_docker_image() {
   echo "Compose file: $compose_file"
   echo "=========================================="
   
-  docker compose -f "$compose_file" build
+  docker compose -f "$compose_file" build dev
   
   if [ $? -eq 0 ]; then
     echo ""
@@ -285,9 +290,12 @@ main() {
         [ $platform_result -eq 1 ] && break # Back to action menu
 
         # Set compose_file and project_name based on platform
-        if [ "$platform" = "gpu-cu124" ]; then
-          compose_file="$SCRIPT_DIR/docker/compose.gpu.cu124.yml"
-          project_name="pvp4real-gpu-cu124"
+        if [ "$platform" = "cu128-sm120" ]; then
+          compose_file="$SCRIPT_DIR/docker/compose.cu128.sm120.yml"
+          project_name="pvp4real-cu128-sm120"
+        elif [ "$platform" = "cu124-sm90" ]; then
+          compose_file="$SCRIPT_DIR/docker/compose.cu124.sm90.yml"
+          project_name="pvp4real-cu124-sm90"
         else
           compose_file="$SCRIPT_DIR/docker/compose.cpu.yml"
           project_name="pvp4real-cpu"
@@ -335,9 +343,12 @@ main() {
     # Command-line mode (default to cpu if not specified)
     action=$1
     platform=${2:-cpu}
-    if [ "$platform" = "gpu-cu124" ]; then
-      compose_file="$SCRIPT_DIR/docker/compose.gpu.cu124.yml"
-      project_name="pvp4real-gpu-cu124"
+    if [ "$platform" = "cu128-sm120" ]; then
+      compose_file="$SCRIPT_DIR/docker/compose.cu128.sm120.yml"
+      project_name="pvp4real-cu128-sm120"
+    elif [ "$platform" = "cu124-sm90" ]; then
+      compose_file="$SCRIPT_DIR/docker/compose.cu124.sm90.yml"
+      project_name="pvp4real-cu124-sm90"
     else
       compose_file="$SCRIPT_DIR/docker/compose.cpu.yml"
       project_name="pvp4real-cpu"

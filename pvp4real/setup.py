@@ -9,4 +9,8 @@ setup(
     name='pvp',
     version='0.0.1',
     packages=find_packages(),
+    package_data={
+        'pvp.sb3': ['version.txt', 'py.typed'],
+    },
+    include_package_data=True,
 )
