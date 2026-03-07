@@ -44,6 +44,7 @@ from std_msgs.msg import Bool
 
 import gymnasium as gym
 from pvp.pvp_td3 import PVPTD3
+from pvp.sb3.common.callbacks import BaseCallback
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +104,28 @@ def save_buffers(model: PVPTD3, run_dir: Path, step: int, final: bool = False, c
         h_path = run_dir / f"buffer_human-{suffix}.pkl"
         r_path = run_dir / f"buffer_replay-{suffix}.pkl"
     model.save_replay_buffer(str(h_path), str(r_path))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GUI Update Callback
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GUIUpdateCallback(BaseCallback):
+    """Callback that updates the GUI after every step."""
+    
+    def __init__(self, gui, verbose: int = 0):
+        super().__init__(verbose)
+        self.gui = gui
+    
+    def _on_step(self) -> bool:
+        """Called after each env.step()"""
+        # Check if user requested stop or quit
+        if self.gui.quit_requested or self.gui.training_stopped:
+            return False  # Abort training
+        
+        # Thread-safe GUI update using root.after()
+        self.gui.update_steps(self.num_timesteps)
+        return True  # Continue training
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -402,7 +425,7 @@ class HITLControlGUI:
     def _on_stop(self) -> None:
         self.training_stopped = True
         self._stop_btn.config(state="disabled")
-        self._status_lbl.config(text="Training stopped. You may Save & Quit.", foreground="red")
+        self._status_lbl.config(text="Stopping training… saving will begin shortly.", foreground="orange")
 
     def _on_mode_switch(self) -> None:
         import subprocess
@@ -604,20 +627,26 @@ def main() -> None:
         # ── Training loop (background thread; mainloop runs on main thread) ───
         save_interval = min(chkpt_save_every, buf_save_every)
         remaining = total_steps - trained
+        
+        # Create callback for real-time GUI updates
+        gui_callback = GUIUpdateCallback(gui)
 
         def _training_loop() -> None:
             nonlocal trained, remaining
             try:
                 while rclpy.ok() and remaining > 0 and not gui.quit_requested and not gui.training_stopped:
                     chunk = min(save_interval, remaining)
+                    
                     model.learn(
                         total_timesteps=chunk,
                         reset_num_timesteps=False,
                         log_interval=log_interval,
+                        callback=gui_callback,
                     )
-                    trained   += chunk
-                    remaining -= chunk
-                    gui.update_steps(trained)
+                    
+                    # Update trained using model's internal counter (handles resume correctly)
+                    trained = model.num_timesteps
+                    remaining = total_steps - trained
 
                     if ckpt_c["is_saved"] and trained % chkpt_save_every == 0:
                         save_checkpoint(model, run_dir, trained, custom_path=save_chkpt_path)
@@ -625,8 +654,15 @@ def main() -> None:
                         save_buffers(model, run_dir, trained, custom_human_path=save_buffer_human_path, custom_replay_path=save_buffer_replay_path)
 
                     node.get_logger().info(f"Step {trained}/{total_steps}")
+                    
+                    # Check if training was stopped by callback
+                    if gui.quit_requested or gui.training_stopped:
+                        break
 
                 # ── Final save (on stop / quit / completion) ──────────────────
+                # Use model's timesteps to get the exact final count
+                trained = model.num_timesteps
+                
                 def _set_saving():
                     gui._status_lbl.config(
                         text=f"Saving {trained}f checkpoint & buffer… please wait.",

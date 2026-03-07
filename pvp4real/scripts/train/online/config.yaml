@@ -15,7 +15,7 @@ common:
   hz: 5.0
   max_lin: 0.3460      # 線速度上限 (from 2F/bag_c dataset)
   max_ang: 0.7391      # 角速度上限 (from 2F/bag_c dataset)
-  action_scale: 1.0    # multiply model output by this factor before publishing cmd_vel
+  action_scale: 3.0    # multiply model output by this factor before publishing cmd_vel
   depth_max_m: 5.0
   stack_n: 5
   resize:
@@ -28,7 +28,7 @@ common:
 training:
   # is_resume_training: False → train from scratch
   # is_resume_training: True  → must provide checkpoint.resume_from (+ optionally buffer.resume_from)
-  is_resume_training: true
+  is_resume_training: True
 
   total_steps: 50000
   learning_starts: 20
@@ -42,7 +42,7 @@ training:
     is_saved: true
     save_every: 1000          # steps
     saved_model_path: "/workspace/pvp4real/models/online/"
-    resume_from: "/workspace/pvp4real/models/offline/0001/chkpt-15000f.zip"        # path to .zip file, required when is_resume_training=true
+    resume_from: "/workspace/pvp4real/models/online/0006/chkpt-2793f.zip"        # path to .zip file, required when is_resume_training=true
     overwrite: true
     # Optional: specify full checkpoint file path (overrides saved_model_path)
     save_chkpt_path:     # e.g. "models/online/0001/chkpt-250.zip"
@@ -51,7 +51,7 @@ training:
     size: 10000              # capacity for each of human_buffer & replay_buffer
     save_every: 1000          # steps
     saved_buffer_path: "/workspace/pvp4real/models/online/"
-    resume_from: "/workspace/pvp4real/models/offline/0001/buffer_human-15000f.pkl"        # optional
+    resume_from: "/workspace/pvp4real/models/online/0006/buffer_human-2793f.pkl"        # optional
     overwrite: true
     # Optional: specify full buffer file path (overrides saved_buffer_path)
     save_buffer_human_path: null   # e.g. "models/online/0001/buffer_human-250.pkl"
