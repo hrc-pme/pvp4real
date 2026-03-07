@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
-"""decompress.py — Decompress a bag_c recording into a raw bag.
+"""decompress.py — Decompress one or more bag_c recordings into raw bags.
 
 Reads config.yaml from the same directory (data/config.yaml).
 Uses `decompress.target_bag_path` (relative to pvp4real/pvp4real/) to locate
-the source run directory, then:
+one or more source run directories, then for each:
 
   Input : {run_dir}/bag_c/   (CompressedImage for rgb & depth)
   Output: {run_dir}/bag/     (raw Image for rgb & depth, others pass-through)
+
+config.yaml examples
+--------------------
+  # Single folder:
+  target_bag_path: "datasets/offline/0001"
+
+  # Multiple folders (list):
+  target_bag_path:
+    - "datasets/offline/1F"
+    - "datasets/offline/2F"
+
+  # Multiple folders (comma-separated string):
+  target_bag_path: "datasets/offline/0001, datasets/offline/0002"
 
 Usage:
     python3 pvp4real/scripts/data/decompress.py
@@ -78,7 +91,6 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-<<<<<<< Updated upstream
 def parse_depth_encoding_from_format(fmt: str) -> str:
     """
     Typical compressedDepth format strings:
@@ -88,7 +100,8 @@ def parse_depth_encoding_from_format(fmt: str) -> str:
     """
     left = fmt.split(";", 1)[0].strip()
     return left if left else "16UC1"
-=======
+
+
 def repair_metadata(bag_dir: Path) -> None:
     """Fix metadata.yaml if the referenced .mcap filenames no longer exist.
 
@@ -132,12 +145,6 @@ def repair_metadata(bag_dir: Path) -> None:
 
     if changed:
         meta_path.write_text(text)
-
-
-def decompress_image(comp_msg: CompressedImage, encoding: str) -> Image:
-    """Decompress a CompressedImage into a raw Image message."""
-    raw_bytes = np.frombuffer(comp_msg.data, dtype=np.uint8)
->>>>>>> Stashed changes
 
 
 def split_header_and_png(data: bytes) -> Tuple[Optional[Tuple[float, float]], bytes]:

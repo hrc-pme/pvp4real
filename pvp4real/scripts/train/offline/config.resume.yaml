@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=
 # Usage: python train.py --config scripts/train/offline/config.resume.yaml
 #
 # ============================================================

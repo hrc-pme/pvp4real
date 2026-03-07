@@ -23,9 +23,11 @@ record:
 
 # ── Decompress ──────────────────────────────────────────────
 decompress:
-  # Path to the run directory to decompress (relative to pvp4real/pvp4real/)
-  # e.g. "datasets/offline/0002" → reads 0002/bag_c, writes 0002/bag
-  target_bag_path: "datasets/offline/0001"
+  # One or more run directories to decompress (relative to pvp4real/pvp4real/).
+  # Each entry: reads <dir>/bag_c, writes <dir>/bag.
+  # Can be a single path (string) or multiple paths (list).
+  target_bag_path:
+    - "datasets/offline/6F_ALL"
 
 # ── Merge ────────────────────────────────────────────────────
 merge:
@@ -37,12 +39,13 @@ merge:
   #     - "datasets/offline/0001"
   #     - "datasets/offline/0002"
   input_dirs:
-    - "/workspace/pvp4real/datasets/offline/0007~0008"
+    - "/workspace/pvp4real/datasets/offline/6F"
+    - "/workspace/pvp4real/datasets/offline/6F_L"
 
   # Output run directory (relative to pvp4real/pvp4real/).
   # Merged bag is written to <output_dir>/bag_c (only_compress=true)
   # or <output_dir>/bag (only_compress=false).
-  output_dir: "/workspace/pvp4real/datasets/offline/1F"
+  output_dir: "/workspace/pvp4real/datasets/offline/6F_ALL"
 
   # If true, search <run>/bag_c/ sub-directories (compressed bags).
   # If false, search <run>/bag/ sub-directories (raw bags).

@@ -44,12 +44,7 @@ training:
   # e.g. ["datasets/offline/0001/bag", "datasets/offline/0002/bag", ...]
   # null → auto-detect the latest <dataset_base_path>/<run>/bag。
   bag_path:
-    - "datasets/offline/0001/bag"
-    - "datasets/offline/0002/bag"
-    - "datasets/offline/0003/bag"
-    - "datasets/offline/0004/bag"
-    - "datasets/offline/0005/bag"
-    - "datasets/offline/0006/bag"
+    - "datasets/offline/6F_ALL/bag"
   dataset_base_path: "datasets/offline/"   # used for bag auto-detection when bag_path is null
 
   total_steps: 15000
@@ -62,16 +57,16 @@ training:
 
   checkpoint:
     is_saved: true
-    save_every: 5000          # steps
+    save_every: 50000          # steps
     saved_model_path: "models/offline/"
     resume_from: null        # e.g. "models/offline/0002/chkpt-5000.zip", required when is_resume_training=true
     overwrite: true          # overwrite existing file with same serial number
 
   buffer:
     size: 10000              # capacity for each of human_buffer & replay_buffer
-    save_every: 15000        # steps
+    save_every: 150000        # steps
     saved_buffer_path: "models/offline/"
-    resume_from: null        # e.g. "models/offline/0002", optional
+    resume_from: null        #  e.g. "models/offline/0002", optional
     overwrite: true
 
   pvp:
